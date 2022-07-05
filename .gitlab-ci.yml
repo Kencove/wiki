@@ -1,0 +1,46 @@
+workflow:
+  rules:
+    # - if: $CI_MERGE_REQUEST_IID
+    - if: "$BUILD_DISABLED"
+      when: never
+    - if: "$CI_COMMIT_TAG || $CI_COMMIT_BRANCH"
+
+variables:
+  BUILD_IMAGE_NAME: "$CI_REGISTRY_IMAGE/$CI_COMMIT_REF_SLUG:$CI_COMMIT_SHA"
+
+build:
+  stage: build
+  image: docker:20.10.6
+  variables:
+    GIT_DEPTH: 0
+
+  services:
+    - docker:20.10.6-dind
+
+  before_script:
+    - echo "Waiting for docker cli to respond before continuing build..."
+    - |
+      for i in $(seq 1 30); do
+          if ! docker info &> /dev/null; then
+              echo "Docker not responding yet. Sleeping for 2s..." && sleep 2s
+          else
+              echo "Docker ready. Continuing build..."
+              break
+          fi
+      done
+    - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" "$CI_REGISTRY"
+
+  script:
+    - export BUILD_IMAGE_LATEST="${CI_REGISTRY_IMAGE}/${CI_COMMIT_REF_SLUG}:latest"
+    - docker pull $BUILD_IMAGE_LATEST || true
+    - |
+      echo BUILD_IMAGE_NAME: $BUILD_IMAGE_NAME BUILD_IMAGE_LATEST: $BUILD_IMAGE_LATEST
+      # --build-arg "HELM_VERSION=$HELM_VERSION"
+      docker build \
+      --cache-from $BUILD_IMAGE_LATEST \
+      --tag $BUILD_IMAGE_NAME \
+      --tag $BUILD_IMAGE_LATEST \
+      -f dev/build/Dockerfile \
+      .
+    - docker push $BUILD_IMAGE_NAME
+    - docker push $BUILD_IMAGE_LATEST
